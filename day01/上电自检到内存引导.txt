@@ -1,0 +1,141 @@
+
+从上电自检到内核引导，自行开发一个Windows操作系统:
+虚拟机：
+oracle, virtual box , 
+Nasm: 汇编
+Nodepad++
+通过硬盘启动自己的操作系统。
+diskpart : 创建一个虚拟磁盘。
+create vdisk file=f:dingst.vhd maxinum=10 type=fixed 
+create vdisk file=f:dingst.vhd maxinum=10 type=fixed 
+CREATE VDISK FILE="E:\test\dingst.vhd" MAXIMUM=1000
+
+裸写磁盘。设置寄存器。hello.asm
+org 07c00h 把程序加载到内存地址07c00（0000::7c00）
+mov ax,cs  代码段
+mov ds,ax   
+mov es,ax
+call Disp  调用函数
+jmp $  无线循环
+Disp:   标签
+	mov ax,BootMsg
+	mov bp,ax
+	mov cx,16
+	mov ax,01301h   
+	mov bx,000ch  0 标识16进制
+	mov dl,0
+	int 10h  10号中断
+BootMsg: db "Hello, OS World!"   
+times 510 - ($-$$)	db 0   从当前位置 到末尾写0 
+dw 0xaa55   
+
+编译asm:
+nasm hello.asm -o boot.bin
+nasm.exe ../hello.asm -o E:\test\bootDINGST.bin
+
+dd命令：用指定大小的块拷贝一个文件，并在拷贝的同时进行指定的转换。
+https://www.cnblogs.com/misswangxing/p/10911969.html
+dd if=bootDINGST.bin of=e:\\test\\dingst.vhd bs=512 count=1
+实验：
+(1)打开virtualBox
+(2) 新建 类型other 版本： other  使用已有磁盘。 
+(3)选择注册虚拟磁盘  选择dingst.vhd
+(4)运行虚拟机
+
+
+二： 操作系统内核
+理解内核。xp 5000万行代码。
+
+os,kernel.  控制内存， 控制cpu .
+cpu:集成电路。 收发信号。alu + cu :控制单元 + 计算单元。
+
+寄存器：存数据
+01010 一定会有一个称作寄存器(register) 把这些数字锁住。
+通过改变计算机寄存器的状态，操作计算机。
+有 4位，8位， 64位。
+
+内存： 
+账本。访问内存： 
+
+指令和指令集：控制
+设计cpu,它可以自动进行运行。
+放在内存中。8086 8个16位通用寄存器：AX, BX, CX, DX, SI, DI, BP, SP 可以数据流通。 
+AX： 可以拆成两个8位寄存器。
+BX： 
+CX, DX, SI, DI, BP, SP
+
+
+逻辑概念：在内存
+代码段：寻址，计算。告诉代码段的地址。用cs指向代码的开始位置。用ds指向数据段的开始。
+数据段：数据。
+
+分段：程序切换。
+一道程序， 多道程序。
+改变cs的值，改变执行的程序。
+CS: 16位寄存器。
+DS：
+定义一个逻辑概念。
+通过管理程序调度。编译好的程序的地址，是一个逻辑地址。
+
+
+加电自检与计算机启动过程：
+没有操作系统之前，启动的是： 固化在bios 中的程序。
+（1）把程序拉入内存。读非易失性的介质。
+（2） cpu执行程序的执行位置。os接管的计算机。
+（3）是谁加载的bios ，被硬件强制加载到
+魔数： 特殊含义的数据。  约定数据。
+
+以IBM 至少内存是32kb  0x8000 1kb的堆栈空间0x400。 剩余： 7c00  
+times 510 -($-$$) db 0   填充0 
+第512个字节： 必须是 aa55 
+0盘0道  1 扇区： 的第一个扇区。 引导+内核。
+
+
+三： 验证性实验，引导区与bios下实模式编程。
+
+在实模式下，用汇编，显示一个文字。
+显卡控制的最小的单位像素： 1920*900
+专门用来显示字符的工作方式： BFFFF - B8000  文本模式的显示适配器。
+PC: 系统把自己初始化成80*25 的文本模式
+一个屏幕显示25行80个字符。
+B8000 写入数据  映射道显卡的显存。
+0 0 0 0 0 1 1 1 
+K R G B I R G B 
+
+disp.asm
+mov ax,0xb800 ;指向文本模式的显示缓冲区   
+mov es,ax     ；再传向 es
+
+mov byte [es:0x00],'I'   ; es 的寄存器，取一个字节 
+mov byte [es:0x01],0x07  ; 断手指
+mov byte [es:0x02],'L'
+mov byte [es:0x03],0x06
+
+times 510 - ($-$$)	db 0
+dw 0xaa55
+;times 510 - ($-$$)	db 0
+;dw 0xaa55  写在最后一个字节。
+
+加入启动程序：
+(1)编译文件： nasm.exe ../disp.asm -o E:\test\disp.bin
+(2)写入启动文件0盘0道1扇区： dd if=disp.bin of=e:\\test\\dingst.vhd bs=512 count=1  
+
+bios 有自动寻找硬件的功能， 只要是0x55aa 结尾。 那么我们就能把它当作引导扇区使用，同时bios在实际的物理内存中
+是有布局的，我们不能破坏这个结构。
+
+
+三 为什么附加段寄存器es不能使用ds数据寄存器数据
+总结：
+16位寄存器：
+CS
+DS：
+SS
+ES
+FS
+GS:
+约定： cx循环次数的控制， bx用来存储起始位置 esi： 复制指令的源地址 edi 就是目标地址
+
+寻址方式：
+立即数寻址： mov ax 0x18 mov ds ax
+内存寻址： mov ax, [fs:0x1234] fs偏移的数据复制给ax
+

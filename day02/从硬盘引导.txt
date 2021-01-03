@@ -1,0 +1,167 @@
+一 硬盘原理：
+cpu 不会和硬盘通讯：
+控制io接口：硬盘控制的主寄存器，写命令，读命令。
+data 寄存器  error 寄存器  柱面/磁头/扇区  CHS, LBA 用一个28位 bit来描述一个扇区。
+devices 寄存器给出harddisk 状态。
+7 
+6  MOD
+5
+4  DEV  主盘/从盘
+3
+2
+1
+0
+
+1选择通道，往该通道上的sector count 寄存器 写入操作扇区数。
+2往该通道的3个LBA寄存器写入扇区的起始位置。
+3 往devices 寄存器写入LBA的24-27位，设为LBA 设置DEV，表明是从盘还是主盘
+4 往command 寄存器写命令
+5 检查status 寄存器
+6 读入数据
+
+二 写程序：
+
+;能够将第二个扇区里面的内容加载进入内存 
+;通过mbr.asm 将loader.asm  放到可用区域(1) 9FBFF- 9FC00 (2) 7BFF - 500
+;0		 1
+;将loader放入0x900
+
+LOADER_BASE_ADDR	equ 0x900  ； 定义变量
+LOADER_START_SECTOR	equ 0x2	;表示已LBA方式，我们的loader存在第2块扇区
+
+SECTION MBR vstart=0x7c00  # 段， 
+	mov ax,cs  cs =  vstart=0x7c00
+	mov ds,ax
+	mov es,ax
+	mov ss,ax
+	mov fs,ax
+	mov sp,0x7c00
+	mov ax,0xb800
+	mov gs,ax    gs = ax = b800
+	
+;利用0x06的功能，调用10号中断，
+; AH = 0x06 
+; AL = 0 表示全部都要清楚
+; BH = 上卷行的属性
+;(CL,CH) 左上角 x,y
+;(DL,DH) 右下角
+
+	mov ax, 0600h
+	mov bx, 0700h
+	mov cx,0
+	mov dx,184fh ;(80,25)
+	
+	int 10h
+;输出当前我们在MBR
+	mov byte [gs:0x00], '1'  ;打印 
+	mov byte [gs:0x01], 0xA4
+	
+	mov byte [gs:0x02], ' '
+	mov byte [gs:0x03], 0xA4
+	
+	mov byte [gs:0x04], 'M'
+	mov byte [gs:0x05], 0xA4
+	
+	
+	mov byte [gs:0x06], 'B'
+	mov byte [gs:0x07], 0xA4
+	
+	mov byte [gs:0x08], 'R'
+	mov byte [gs:0x09], 0xA4
+	
+	mov eax,LOADER_START_SECTOR ;扩展， LBA 读入的扇区
+	mov bx,LOADER_BASE_ADDR		;写入的地址
+	mov cx,1					;等待读入的扇区数
+	call rd_disk                ；读数据
+	
+	jmp LOADER_BASE_ADDR		;调到实际的物理内存
+
+rd_disk:  ；读取程序，放在哪里？
+
+	;eax LBA的扇区号
+	;bx 数据写入的内存地址
+	;cx 读入的扇区数
+	
+	mov esi,eax		;备份eax   esi： 复制指令的源地址 edi 就是目标地址
+	mov di,cx		;备份cx   等待读入的扇区数 di寄存器
+	
+;读写硬盘
+	mov dx, 0x1f2   设置读取的扇区数
+	mov al, cl       
+	out dx, al
+	mov eax,esi
+
+;将LBA的地址存入0x1f3，0x1f6
+	
+	;7-0位写入0x1f3
+	mov dx, 0x1f3
+	out dx,al
+	
+	;15-8位写给1f4
+	mov cl,8
+	shr eax,cl
+	mov dx,0x1f4
+	out dx,al
+	
+	;23-16位写给1f5
+	shr eax,cl
+	mov dx,0x1f5
+	out dx,al
+	
+	shr eax,cl
+	and al,0x0f
+	or al,0xe0	;设置7-4位为1110，此时才是lBA模式
+	mov dx,0x1f6
+	out dx,al
+	
+	;向0x1f7写入读命令
+	mov dx,0x1f7   
+	mov al,0x20
+	out dx,al
+	
+	;检测硬盘状态
+	.not_ready:
+	nop
+	in al,dx
+	and al,0x88; 4位为1，表示可以传输，7位为1表示硬盘忙
+	cmp al,0x08
+	jnz .not_ready 跳转到
+	
+	;读数据
+	mov ax,di     
+	mov dx, 256
+	mul dx    
+	mov cx,ax
+	mov dx,0x1f0
+	
+	.go_on:      没用读完继续
+		in ax,dx
+		mov [bx],ax
+		add bx,2
+		loop .go_on  循环
+		ret   返回
+	
+	times 510 - ($-$$)	db 0   
+	dw 0xaa55
+
+nasm.exe ../mbr.asm -o E:\test\mbr.bin
+nasm.exe ../Loader.asm -o E:\test\Loader.bin
+
+写入程序：
+dd if=mbr.bin of=e:\\test\\dingst.vhd bs=512 count=1 
+dd if=Loader.bin of=e:\\test\\dingst.vhd bs=512 count=1 seek=2
+
+没有加载Loader.bin的原因：
+
+
+LOADER_BASE_ADDR	equ 0x900
+section loader vstart=LOADER_BASE_ADDR
+
+mov ax,0xb800 ;指向文本模式的显示缓冲区
+mov es,ax      ;将b800 写入es
+mov byte [es:0x00],'O'
+mov byte [es:0x01],0x07
+mov byte [es:0x02],'K'
+mov byte [es:0x03],0x06
+
+jmp $  停止在这里
